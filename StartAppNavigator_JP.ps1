@@ -1,42 +1,56 @@
 ﻿# ==========================================================
-# Mustang AutoExec Navigator v1.5 [Pre-Filtered & Loop]
+# Mustang AutoExec Navigator v1.6.2 [日本語完全対応版]
 # ==========================================================
 
-# 1. 最初に表示モードを選択 (ここで False を打つ手間を省く)
-$choice = Read-Host "`n[MODE SELECT] `n 1: User Items Only (Hide Microsoft/System) `n 2: Show Everything (All Services/Tasks) `n Choose (1 or 2)"
+# 1. 表示モードの選択
+$choice = Read-Host "`n[モード選択] `n 1: ユーザー項目のみ表示 (推奨) `n 2: 全ての項目を表示 (システムを含む) `n 番号を入力してください (1 または 2)"
 $hideSystem = if ($choice -eq "2") { $false } else { $true }
 
 $Report = New-Object System.Collections.Generic.List[PSCustomObject]
 
-Write-Host "`nScanning... Please wait." -ForegroundColor Cyan
+# デジタル署名から発行元を取得する関数
+function Get-Publisher {
+    param($path)
+    if (-not $path -or -not (Test-Path $path)) { return "N/A" }
+    try {
+        $sig = Get-AuthenticodeSignature $path -ErrorAction SilentlyContinue
+        if ($sig.SignerCertificate) {
+            return $sig.SignerCertificate.Subject.Split(',')[0].Replace('CN=', '')
+        } else { return "署名なし" }
+    } catch { return "検証不可" }
+}
+
+Write-Host "`nシステムをスキャン中... しばらくお待ちください。" -ForegroundColor Cyan
 
 # --- サービス取得 ---
 Get-CimInstance Win32_Service | ForEach-Object {
-    $isSys = ($_.PathName -like "*C:\Windows\System32*" -or $_.AcceptPause -eq $false -and $_.ServiceType -eq "Share Process")
+    $isSys = ($_.PathName -like "*C:\Windows\System32*" -or $_.AcceptPause -eq $false)
+    $execPath = $_.PathName.Split(' ')[0].Trim('"')
     $Report.Add([PSCustomObject]@{
-        Status   = $_.State
-        Type     = "Service"
-        Name     = $_.DisplayName
-        IsSystem = $isSys
-        Command  = $_.PathName
-        Location = "services.msc"
+        システム項目 = if($isSys){"はい"}else{"いいえ"}
+        種類     = "サービス"
+        名前     = $_.DisplayName
+        実行権限   = $_.StartName
+        状態     = $_.State
+        発行元    = Get-Publisher $execPath
+        コマンド   = $_.PathName
+        場所     = "services.msc"
     })
 }
 
 # --- タスク取得 ---
 Get-ScheduledTask | ForEach-Object {
     $isSys = ($_.TaskPath -like "\Microsoft\Windows\*")
-    $actionInfo = if ($_.Actions -and $_.Actions.Execute) {
-        $_.Actions.Execute + " " + $_.Actions.Arguments
-    } else { "Other Action" }
-
+    $execPath = if ($_.Actions.Execute) { $_.Actions.Execute.Trim('"') } else { $null }
     $Report.Add([PSCustomObject]@{
-        Status   = $_.State
-        Type     = "Task"
-        Name     = $_.TaskName
-        IsSystem = $isSys
-        Command  = $actionInfo
-        Location = "Task: " + $_.TaskPath
+        システム項目 = if($isSys){"はい"}else{"いいえ"}
+        種類     = "タスク"
+        名前     = $_.TaskName
+        実行権限   = $_.Principal.UserId
+        状態     = $_.State
+        発行元    = Get-Publisher $execPath
+        コマンド   = $_.Actions.Execute
+        場所     = "Task: " + $_.TaskPath
     })
 }
 
@@ -50,8 +64,16 @@ foreach ($key in $RunKeys) {
     if (Test-Path $key) {
         $reg = Get-ItemProperty $key
         $reg.PSObject.Properties | Where-Object { $_.Name -notin 'PSPath','PSParentPath','PSChildName','PSDrive','PSProvider' } | ForEach-Object {
+            $execPath = $_.Value.Split(' ')[0].Trim('"')
             $Report.Add([PSCustomObject]@{
-                Status   = "Enabled"; Type = "Registry"; Name = $_.Name; IsSystem = $false; Command = $_.Value; Location = $key
+                システム項目 = "いいえ"
+                種類     = "レジストリ"
+                名前     = $_.Name
+                実行権限   = "ログインユーザー"
+                状態     = "有効"
+                発行元    = Get-Publisher $execPath
+                コマンド   = $_.Value
+                場所     = $key
             })
         }
     }
@@ -63,62 +85,45 @@ foreach ($folder in $StartupFolders) {
     if (Test-Path $folder) {
         Get-ChildItem $folder -File | ForEach-Object {
             $Report.Add([PSCustomObject]@{
-                Status   = "Enabled"; Type = "Folder"; Name = $_.BaseName; IsSystem = $false; Command = $_.FullName; Location = $folder
+                システム項目 = "いいえ"
+                種類     = "フォルダ"
+                名前     = $_.BaseName
+                実行権限   = "ログインユーザー"
+                状態     = "有効"
+                発行元    = Get-Publisher $_.FullName
+                コマンド   = $_.FullName
+                場所     = $folder
             })
         }
     }
 }
 
-# --- フィルタ適用 ---
-# 最初に選んだモードに基づいて、表示用のリストを作成する
-$DisplayList = if ($hideSystem) { 
-    $Report | Where-Object { $_.IsSystem -eq $false } 
-} else { 
-    $Report 
-}
+# 表示リストのフィルタリング
+$DisplayList = if ($hideSystem) { $Report | Where-Object { $_.システム項目 -eq "いいえ" } } else { $Report }
 
-Write-Host "Done! Filtering Ready." -ForegroundColor Green
+Write-Host "スキャン完了！" -ForegroundColor Green
 
-# ==========================================================
-# 連続ナビゲーション：ループ構造
-# ==========================================================
+# 連続ナビゲーションループ
 do {
-    $title = if ($hideSystem) { "USER ITEMS ONLY MODE - Select and OK to Jump" } else { "ALL ITEMS MODE - Select and OK to Jump" }
-    
-    # フィルタ済みの $DisplayList を表示し続けるので、検索ワード以外の「一覧の状態」は維持されます
-    $selected = $DisplayList | Out-GridView -Title "$title (Cancel or Close to Exit)" -PassThru
+    $titleText = if ($hideSystem) { "ユーザー項目のみ表示中" } else { "全項目表示中" }
+    $selected = $DisplayList | Out-GridView -Title "Navigator v1.6.2 [$titleText] - 項目を選んで[OK]で詳細へ（キャンセルで終了）" -PassThru
 
     if ($selected) {
         $target = $selected[0]
-        Write-Host "`nProcessing: $($target.Name)" -ForegroundColor Yellow
-        
-        # Google検索URL生成
-        $query = [uri]::EscapeDataString("$($target.Name) $($target.Type) Windows")
+        $query = [uri]::EscapeDataString("$($target.名前) $($target.発行元) Windows")
         $searchUrl = "https://www.google.com/search?q=$query"
 
-        # 1. レジストリ / フォルダ：場所を開く
-        if ($target.Type -eq "Registry" -or $target.Type -eq "Folder") {
-            Write-Host "Action: Opening Location..." -ForegroundColor Cyan
-            if ($target.Type -eq "Registry") {
-                $regPath = $target.Location.Replace("HKLM:\", "HKEY_LOCAL_MACHINE\").Replace("HKCU:\", "HKEY_CURRENT_USER\").Replace("HKLM:\SOFTWARE\WOW6432Node\", "HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\")
+        if ($target.種類 -eq "レジストリ" -or $target.種類 -eq "フォルダ") {
+            if ($target.種類 -eq "レジストリ") {
+                $regPath = $target.場所.Replace("HKLM:\", "HKEY_LOCAL_MACHINE\").Replace("HKCU:\", "HKEY_CURRENT_USER\").Replace("HKLM:\SOFTWARE\WOW6432Node\", "HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\")
                 Set-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Applets\Regedit" -Name "LastKey" -Value $regPath
                 Start-Process "regedit.exe"
-            } else {
-                if (Test-Path $target.Location) { Start-Process "explorer.exe" $target.Location }
-            }
-        }
-        
-        # 2. サービス / タスク：検索 & 管理画面
-        else {
-            Write-Host "Action: Searching info..." -ForegroundColor Cyan
+            } else { Start-Process "explorer.exe" $target.場所 }
+        } else {
             Start-Process $searchUrl
-            if ($target.Type -eq "Service") { Start-Process "services.msc" }
-            if ($target.Type -eq "Task") { Start-Process "taskschd.msc" }
+            if ($target.種類 -eq "サービス") { Start-Process "services.msc" }
+            if ($target.種類 -eq "タスク") { Start-Process "taskschd.msc" }
         }
-
-        Write-Host "Done! Returning to List..." -ForegroundColor Green
         Start-Sleep -Milliseconds 300
     }
 } while ($selected)
-
-Write-Host "`nNavigator Closed. Have a nice day!" -ForegroundColor Cyan

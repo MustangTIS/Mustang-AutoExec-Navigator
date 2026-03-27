@@ -1,49 +1,47 @@
 ==========================================================
- Mustang AutoExec Navigator v1.5
+ Mustang AutoExec Navigator v1.6.2
 ==========================================================
 
 [Overview]
 Mustang AutoExec Navigator is a lightweight, powerful tool 
-for Windows Administrators to audit and manage "Auto-Run" items.
+for Windows Administrators to audit and manage "Auto-Run" items[cite: 1].
+It provides a unified view across Services, Task Scheduler, 
+Registry, and Startup Folders[cite: 2].
 
-It provides a unified view of items scattered across 
-Services, Task Scheduler, Registry (Run keys), and Startup Folders.
+[Key Features (v1.6.2)]
+1. Digital Signature (Publisher) Verification
+   Automatically retrieves publisher names (e.g., Microsoft, Adobe).
+   Helps identify "Unsigned" items that may require investigation.
+2. Execution Context (RunAs) Visibility
+   Displays whether an item runs under "SYSTEM" or "User" privileges.
+   Essential for assessing the impact of disabling a specific item.
+3. Optimized Column Layout
+   Reorganized columns based on administrative workflow:
+   [SystemItem] -> [Type] -> [Name] -> [RunAs] -> [Status] -> [Publisher].
 
-[Key Features]
-1. Noise Reduction Filter (Selectable at Launch)
-   Excludes Microsoft/System standard items, focusing only on 
-   user-installed or third-party applications.
-2. Direct Registry Jump
-   Select a Registry item and click [OK] to open the 
-   Registry Editor directly at that specific key.
-3. Automatic Google Search (Services/Tasks)
-   Instantly searches for the item name in your browser 
-   to help identify unknown services or tasks.
-4. Continuous Navigation (Loop Mode)
-   Returns to the list after each action, allowing for 
-   rapid, sequential investigation.
+[Standard Features]
+- Noise Reduction Filter: Excludes Microsoft/System standard items[cite: 3].
+- Direct Registry Jump: Opens Registry Editor at the specific key instantly[cite: 4].
+- Advanced Google Search: Automatically searches for items using 
+  Name + Publisher for high-accuracy results[cite: 5].
+- Continuous Navigation: Returns to the list after each action[cite: 6].
 
 [File Structure]
-- AutoRun.bat               : Main Launcher (Run as Admin recommended)
-- StartAppNavigator_JP.ps1  : Japanese Edition
-- StartAppNavigator_EN.ps1  : English Edition
+- AutoRun.bat               : Main Launcher (MUST Run as Administrator) [cite: 7]
+- StartAppNavigator_JP.ps1  : Japanese Edition [cite: 7]
+- StartAppNavigator_EN.ps1  : English Edition [cite: 7]
 
 [How to Use]
-1. Run "AutoRun.bat".
-2. Select the display mode in the console window:
-   [1] User Items Only : Recommended for daily audits.
-   [2] Show Everything : For full system investigation.
-3. Select an item from the grid and click [OK]:
-   - Registry/Folder : Opens the specific location.
-   - Service/Task    : Opens Google Search and Management Consoles.
-4. To exit, close the grid window or click [Cancel].
+1. Right-click "AutoRun.bat" and select "Run as Administrator".
+2. Select Language (1.Japanese / 2.English).
+3. Select Display Mode ([1] User Items Only is recommended)[cite: 8].
+4. Select an item and click [OK] to jump to its location or search info[cite: 10].
 
 [Requirements]
-- Windows 10 / 11 / Windows Server 2011 - 2025
-- PowerShell 5.1 or higher
+- Windows 10 / 11 / Windows Server 2011 - 2025 [cite: 12]
+- PowerShell 5.1 or higher [cite: 12]
 
 [Disclaimer]
 This tool is for information and navigation purposes only. 
-Any modifications to the registry or stopping services should 
-be performed at your own risk.
+Perform all modifications at your own risk[cite: 13].
 ==========================================================

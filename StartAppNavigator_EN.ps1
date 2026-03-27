@@ -1,42 +1,56 @@
 ﻿# ==========================================================
-# Mustang AutoExec Navigator v1.5 [EN]
+# Mustang AutoExec Navigator v1.6.2 [English Edition]
 # ==========================================================
 
 # 1. Mode Selection
-$choice = Read-Host "`n[MODE SELECT] `n 1: User Items Only (Hide Microsoft/System) `n 2: Show Everything (All Services/Tasks) `n Choose (1 or 2)"
+$choice = Read-Host "`n[MODE SELECT] `n 1: User Items Only (Recommended) `n 2: Show Everything (Including System) `n Choose (1 or 2)"
 $hideSystem = if ($choice -eq "2") { $false } else { $true }
 
 $Report = New-Object System.Collections.Generic.List[PSCustomObject]
 
-Write-Host "`nScanning... Please wait." -ForegroundColor Cyan
+# Function to get digital signature / Publisher
+function Get-Publisher {
+    param($path)
+    if (-not $path -or -not (Test-Path $path)) { return "N/A" }
+    try {
+        $sig = Get-AuthenticodeSignature $path -ErrorAction SilentlyContinue
+        if ($sig.SignerCertificate) {
+            return $sig.SignerCertificate.Subject.Split(',')[0].Replace('CN=', '')
+        } else { return "Unsigned" }
+    } catch { return "Verify Failed" }
+}
+
+Write-Host "`nScanning system items... Please wait." -ForegroundColor Cyan
 
 # --- Services ---
 Get-CimInstance Win32_Service | ForEach-Object {
-    $isSys = ($_.PathName -like "*C:\Windows\System32*" -or $_.AcceptPause -eq $false -and $_.ServiceType -eq "Share Process")
+    $isSys = ($_.PathName -like "*C:\Windows\System32*" -or $_.AcceptPause -eq $false)
+    $execPath = $_.PathName.Split(' ')[0].Trim('"')
     $Report.Add([PSCustomObject]@{
-        Status   = $_.State
-        Type     = "Service"
-        Name     = $_.DisplayName
-        IsSystem = $isSys
-        Command  = $_.PathName
-        Location = "services.msc"
+        SystemItem = if($isSys){"Yes"}else{"No"}
+        Type       = "Service"
+        Name       = $_.DisplayName
+        RunAs      = $_.StartName
+        Status     = $_.State
+        Publisher  = Get-Publisher $execPath
+        Command    = $_.PathName
+        Location   = "services.msc"
     })
 }
 
 # --- Scheduled Tasks ---
 Get-ScheduledTask | ForEach-Object {
     $isSys = ($_.TaskPath -like "\Microsoft\Windows\*")
-    $actionInfo = if ($_.Actions -and $_.Actions.Execute) {
-        $_.Actions.Execute + " " + $_.Actions.Arguments
-    } else { "Other Action" }
-
+    $execPath = if ($_.Actions.Execute) { $_.Actions.Execute.Trim('"') } else { $null }
     $Report.Add([PSCustomObject]@{
-        Status   = $_.State
-        Type     = "Task"
-        Name     = $_.TaskName
-        IsSystem = $isSys
-        Command  = $actionInfo
-        Location = "Task: " + $_.TaskPath
+        SystemItem = if($isSys){"Yes"}else{"No"}
+        Type       = "Task"
+        Name       = $_.TaskName
+        RunAs      = $_.Principal.UserId
+        Status     = $_.State
+        Publisher  = Get-Publisher $execPath
+        Command    = $_.Actions.Execute
+        Location   = "Task: " + $_.TaskPath
     })
 }
 
@@ -50,8 +64,16 @@ foreach ($key in $RunKeys) {
     if (Test-Path $key) {
         $reg = Get-ItemProperty $key
         $reg.PSObject.Properties | Where-Object { $_.Name -notin 'PSPath','PSParentPath','PSChildName','PSDrive','PSProvider' } | ForEach-Object {
+            $execPath = $_.Value.Split(' ')[0].Trim('"')
             $Report.Add([PSCustomObject]@{
-                Status   = "Enabled"; Type = "Registry"; Name = $_.Name; IsSystem = $false; Command = $_.Value; Location = $key
+                SystemItem = "No"
+                Type       = "Registry"
+                Name       = $_.Name
+                RunAs      = "Logged-in User"
+                Status     = "Enabled"
+                Publisher  = Get-Publisher $execPath
+                Command    = $_.Value
+                Location   = $key
             })
         }
     }
@@ -63,55 +85,45 @@ foreach ($folder in $StartupFolders) {
     if (Test-Path $folder) {
         Get-ChildItem $folder -File | ForEach-Object {
             $Report.Add([PSCustomObject]@{
-                Status   = "Enabled"; Type = "Folder"; Name = $_.BaseName; IsSystem = $false; Command = $_.FullName; Location = $folder
+                SystemItem = "No"
+                Type       = "Folder"
+                Name       = $_.BaseName
+                RunAs      = "Logged-in User"
+                Status     = "Enabled"
+                Publisher  = Get-Publisher $_.FullName
+                Command    = $_.FullName
+                Location   = $folder
             })
         }
     }
 }
 
-# --- Filter ---
-$DisplayList = if ($hideSystem) { 
-    $Report | Where-Object { $_.IsSystem -eq $false } 
-} else { 
-    $Report 
-}
+# Filtering
+$DisplayList = if ($hideSystem) { $Report | Where-Object { $_.SystemItem -eq "No" } } else { $Report }
 
-Write-Host "Done! Filtering Ready." -ForegroundColor Green
+Write-Host "Scan Completed!" -ForegroundColor Green
 
-# ==========================================================
 # Navigation Loop
-# ==========================================================
 do {
-    $title = if ($hideSystem) { "USER ITEMS ONLY MODE - Select and OK to Jump" } else { "ALL ITEMS MODE - Select and OK to Jump" }
-    $selected = $DisplayList | Out-GridView -Title "$title (Cancel or Close to Exit)" -PassThru
+    $titleText = if ($hideSystem) { "USER ITEMS ONLY" } else { "ALL ITEMS" }
+    $selected = $DisplayList | Out-GridView -Title "Navigator v1.6.2 [$titleText] - Select item and OK to Jump (Cancel to Exit)" -PassThru
 
     if ($selected) {
         $target = $selected[0]
-        Write-Host "`nProcessing: $($target.Name)" -ForegroundColor Yellow
-        
-        $query = [uri]::EscapeDataString("$($target.Name) $($target.Type) Windows")
+        $query = [uri]::EscapeDataString("$($target.Name) $($target.Publisher) Windows")
         $searchUrl = "https://www.google.com/search?q=$query"
 
         if ($target.Type -eq "Registry" -or $target.Type -eq "Folder") {
-            Write-Host "Action: Opening Location..." -ForegroundColor Cyan
             if ($target.Type -eq "Registry") {
                 $regPath = $target.Location.Replace("HKLM:\", "HKEY_LOCAL_MACHINE\").Replace("HKCU:\", "HKEY_CURRENT_USER\").Replace("HKLM:\SOFTWARE\WOW6432Node\", "HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\")
                 Set-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Applets\Regedit" -Name "LastKey" -Value $regPath
                 Start-Process "regedit.exe"
-            } else {
-                if (Test-Path $target.Location) { Start-Process "explorer.exe" $target.Location }
-            }
-        }
-        else {
-            Write-Host "Action: Searching info..." -ForegroundColor Cyan
+            } else { Start-Process "explorer.exe" $target.Location }
+        } else {
             Start-Process $searchUrl
             if ($target.Type -eq "Service") { Start-Process "services.msc" }
             if ($target.Type -eq "Task") { Start-Process "taskschd.msc" }
         }
-
-        Write-Host "Done! Returning to Navigator..." -ForegroundColor Green
         Start-Sleep -Milliseconds 300
     }
 } while ($selected)
-
-Write-Host "`nNavigator Closed." -ForegroundColor Cyan
